@@ -418,7 +418,7 @@ int GpioIntrExample(XScuGic *Intc, XGpioPs *Gpio, u16 DeviceId, u16 GpioIntrId)
 	 * Loop forever while the button changes are handled by the interrupt
 	 * level processing.
 	 */
-	//while(AllButtonsPressed == FALSE);
+	while(AllButtonsPressed == FALSE);
 
 	return XST_SUCCESS;
 }
