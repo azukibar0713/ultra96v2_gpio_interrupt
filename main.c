@@ -177,15 +177,18 @@ static void TaskPri01( void *pvParameters ) {
 	int_start = 0;
 	int_end = 0;
 	while(1) {
-		xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
-		//vTaskDelay(pdMS_TO_TICKS(1000)); // これを入れるとTaskが起きてこない。割り込みは入る。
+		//xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
+		vTaskDelay(pdMS_TO_TICKS(1000)); // これを入れるとTaskが起きてこない。割り込みは入る。
 
+		//taskENTER_CRITICAL();
 		//vTaskSuspend(NULL);
-		task_steady = pmon_read_cycle_counter();
+		//taskEXIT_CRITICAL();
+		xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
+		//task_steady = pmon_read_cycle_counter();
 		//end = pmon_read_cycle_counter();
 		//xil_printf("time = %ld\r\n", end - start);
-		//if (int_start != 0 && int_end != 0) {
-		if(button_push) {
+		if (int_start != 0 && int_end != 0) {
+		//if(button_push) {
 			xil_printf("%ld %ld\r\n", int_start - task_steady, int_end - int_start);
 			int_start = 0;
 			int_end = 0;
@@ -193,20 +196,61 @@ static void TaskPri01( void *pvParameters ) {
 	}
 }
 
+
+static void IntrHandler(void *CallBackRef, u32 Bank, u32 Status)
+{
+	int_start = pmon_read_cycle_counter();
+
+	//XGpioPs *Gpio = (XGpioPs *)CallBackRef;
+	//u32 DataRead;
+
+	xil_printf("InitrHandler\n\r");
+	//button_push = 1;
+#if 0
+	/* Push the switch button */
+	DataRead = XGpioPs_ReadPin(Gpio, Input_Pin);
+	if (DataRead != 0) {
+		XGpioPs_SetDirectionPin(Gpio, Output_Pin, 1);
+		XGpioPs_SetOutputEnablePin(Gpio, Output_Pin, 1);
+		XGpioPs_WritePin(Gpio, Output_Pin, DataRead);
+		AllButtonsPressed = TRUE;
+	}
+#endif
+	//xTaskResumeFromISR(TaskHdlPri01);
+	int_end= pmon_read_cycle_counter();
+
+	BaseType_t xYieldRequired;
+
+	// Resume the suspended task.
+	xYieldRequired = xTaskResumeFromISR(TaskHdlPri01);
+
+	if (xYieldRequired == pdTRUE) {
+		// We should switch context so the ISR returns to a different task.
+		// NOTE:  How this is done depends on the port you are using.  Check
+		// the documentation and examples for your port.
+		//portYIELD_FROM_ISR();
+	}
+}
+
+int GpioSet(XScuGic *Intc, XGpioPs *Gpio, u16 DeviceId, u16 GpioIntrId);
 static void prvSetupHardwareTask( void *pvParameters ) {
 	xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
 	/*
 	 * Run the GPIO interrupt example, specify the parameters that
 	 * are generated in xparameters.h.
 	 */
+#if 0
 	int Status = GpioIntrExample(&Intc, &Gpio, GPIO_DEVICE_ID, GPIO_INTERRUPT_ID);
 	if (Status != XST_SUCCESS) {
 		xil_printf("GPIO Interrupt Example Test Failed\r\n");
 		return XST_FAILURE;
 	}
+#endif
+	GpioSet(&Intc, &Gpio, GPIO_DEVICE_ID, GPIO_INTERRUPT_ID);
+	xPortInstallInterruptHandler(GPIO_INTERRUPT_ID, IntrHandler, (void*)0);
+	vPortEnableInterrupt(GPIO_INTERRUPT_ID);
 	vTaskDelete( xSetupHardwareTask );
 }
-
 
 int main( void )
 {
@@ -385,8 +429,63 @@ static void vTimerCallback( TimerHandle_t pxTimer )
 * @note		None
 *
 *****************************************************************************/
+int GpioSet(XScuGic *Intc, XGpioPs *Gpio, u16 DeviceId, u16 GpioIntrId)
+{
+	XGpioPs_Config *ConfigPtr;
+	int Status;
+	int Type_of_board;
+
+	/* Initialize the Gpio driver. */
+	ConfigPtr = XGpioPs_LookupConfig(DeviceId);
+	if (ConfigPtr == NULL) {
+		return XST_FAILURE;
+	}
+	Type_of_board = XGetPlatform_Info();
+	switch (Type_of_board) {
+		case XPLAT_ZYNQ_ULTRA_MP:
+			Input_Pin = 23;
+			Output_Pin = 20;
+			break;
+
+		case XPLAT_ZYNQ:
+			Input_Pin = 14;
+			Output_Pin = 10;
+			break;
+	}
+	XGpioPs_CfgInitialize(Gpio, ConfigPtr, ConfigPtr->BaseAddr);
+
+	/* Run a self-test on the GPIO device. */
+	Status = XGpioPs_SelfTest(Gpio);
+	if (Status != XST_SUCCESS) {
+		return XST_FAILURE;
+	}
+
+	/* Set the direction for the specified pin to be input */
+	XGpioPs_SetDirectionPin(Gpio, Input_Pin, 0x0);
+
+	/* Set the direction for the specified pin to be output. */
+	XGpioPs_SetDirectionPin(Gpio, Output_Pin, 1);
+	XGpioPs_SetOutputEnablePin(Gpio, Output_Pin, 1);
+	XGpioPs_WritePin(Gpio, Output_Pin, 0x0);
+
+	/* Enable falling edge interrupts for all the pins in bank 0. */
+	//XGpioPs_SetIntrType(Gpio, GPIO_BANK, 0x00, 0xFFFFFFFF, 0x00);
+	//XGpioPs_SetIntrType(Gpio, GPIO_BANK, 1, 0, 0x00);  // これだとSW1を押している時だけ割り込みが入った.
+	//XGpioPs_SetIntrType(Gpio, GPIO_BANK, 1, 1, 0x00);  // これでも↑と同じ. Falling Edge -> Rising　Edgeにかえたはずだが。そもそもedgeでなくlevelになってる.
+	XGpioPs_SetIntrType(Gpio, GPIO_BANK, 0xFFFFFFFF, 0, 0x00);  // bitごとのマスクだった。これで押したときだけ割り込みはい９った！.
+
+	/* Set the handler for gpio interrupts. */
+	XGpioPs_SetCallbackHandler(Gpio, (void *)Gpio, IntrHandler);
+
+
+	/* Enable the GPIO interrupts of Bank 0. */
+	XGpioPs_IntrEnable(Gpio, GPIO_BANK, (1 << Input_Pin));
+}
+
+
 int GpioIntrExample(XScuGic *Intc, XGpioPs *Gpio, u16 DeviceId, u16 GpioIntrId)
 {
+
 	XGpioPs_Config *ConfigPtr;
 	int Status;
 	int Type_of_board;
@@ -445,41 +544,7 @@ int GpioIntrExample(XScuGic *Intc, XGpioPs *Gpio, u16 DeviceId, u16 GpioIntrId)
 	return XST_SUCCESS;
 }
 
-/****************************************************************************/
-/**
-* This function is the user layer callback function for the bank 0 interrupts of
-* the GPIO device. It checks if all the switches have been pressed to stop the
-* interrupt processing and exit from the example.
-*
-* @param	CallBackRef is a pointer to the upper layer callback reference.
-* @param	Status is the Interrupt status of the GPIO bank.
-*
-* @return	None.
-*
-* @note		None.
-*
-******************************************************************************/
-static void IntrHandler(void *CallBackRef, u32 Bank, u32 Status)
-{
-	//int_start = pmon_read_cycle_counter();
 
-	XGpioPs *Gpio = (XGpioPs *)CallBackRef;
-	u32 DataRead;
-
-	xil_printf("InitrHandler\n\r");
-	button_push = 1;
-#if 0
-	/* Push the switch button */
-	DataRead = XGpioPs_ReadPin(Gpio, Input_Pin);
-	if (DataRead != 0) {
-		XGpioPs_SetDirectionPin(Gpio, Output_Pin, 1);
-		XGpioPs_SetOutputEnablePin(Gpio, Output_Pin, 1);
-		XGpioPs_WritePin(Gpio, Output_Pin, DataRead);
-		AllButtonsPressed = TRUE;
-	}
-#endif
-	//int_end= pmon_read_cycle_counter();
-}
 
 
 /*****************************************************************************/
@@ -518,12 +583,15 @@ static int SetupInterruptSystem(XScuGic *GicInstancePtr, XGpioPs *Gpio,
 	if (NULL == IntcConfig) {
 		return XST_FAILURE;
 	}
-
+	// ここから最後までコメントあうとするとTaskDelayは動く.
+#if 1
 	Status = XScuGic_CfgInitialize(GicInstancePtr, IntcConfig,
 					IntcConfig->CpuBaseAddress);
 	if (Status != XST_SUCCESS) {
 		return XST_FAILURE;
 	}
+#endif
+	// ここから最後までコメントあうとするとTaskDelayは動かない。↑が原因ぽい.
 
 
 	/*
@@ -533,7 +601,7 @@ static int SetupInterruptSystem(XScuGic *GicInstancePtr, XGpioPs *Gpio,
 	Xil_ExceptionRegisterHandler(XIL_EXCEPTION_ID_INT,
 				(Xil_ExceptionHandler)XScuGic_InterruptHandler,
 				GicInstancePtr);
-
+#if 1
 	/*
 	 * Connect the device driver handler that will be called when an
 	 * interrupt for the device occurs, the handler defined above performs
@@ -590,7 +658,7 @@ static int SetupInterruptSystem(XScuGic *GicInstancePtr, XGpioPs *Gpio,
 
 	/* Enable the interrupt for the GPIO device. */
 	XScuGic_Enable(GicInstancePtr, GpioIntrId);
-
+#endif
 
 	/* Enable interrupts in the Processor. */
 	Xil_ExceptionEnableMask(XIL_EXCEPTION_IRQ);
