@@ -99,43 +99,6 @@ const char* GetTaskName( const TaskHandle_t xHandle)
 	GetTaskStatus(xHandle, &xTaskDetails);
 	return xTaskDetails.pcTaskName;
 }
-
-static int button_push = 0;
-static unsigned long start, end;
-static unsigned long task_steady, int_start, int_end, task_start, task_start;
-static TaskHandle_t TaskHdlPri00;
-static TaskHandle_t TaskHdlPri01;
-static void TaskPri00( void *pvParameters ) {
-	while(1) {
-		//xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
-		//vTaskDelay(pdMS_TO_TICKS(1000));
-
-		//vTaskResume(TaskHdlPri01);
-
-	}
-}
-static void TaskPri01( void *pvParameters ) {
-	xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
-	start = pmon_start_cycle_counter();
-	int_start = 0;
-	int_end = 0;
-	while(1) {
-		xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
-		vTaskDelay(pdMS_TO_TICKS(1000));
-
-		//vTaskSuspend(NULL);
-		task_steady = pmon_read_cycle_counter();
-		//end = pmon_read_cycle_counter();
-		//xil_printf("time = %ld\r\n", end - start);
-		//if (int_start != 0 && int_end != 0) {
-		if(button_push) {
-			xil_printf("%ld %ld\r\n", int_start - task_steady, int_end - int_start);
-			int_start = 0;
-			int_end = 0;
-		}
-	}
-}
-
 // https://github.com/Xilinx/embeddedsw/blob/master/XilinxProcessorIPLib/drivers/gpiops/examples/xgpiops_intr_example.c
 /************************** Constant Definitions *****************************/
 
@@ -176,6 +139,75 @@ static u32 AllButtonsPressed; /* Intr status of the bank */
 static u32 Input_Pin; /* Switch button */
 static u32 Output_Pin; /* LED button */
 
+
+
+
+static int button_push = 0;
+static unsigned long start, end;
+static unsigned long task_steady, int_start, int_end, task_start, task_start;
+static TaskHandle_t TaskHdlPri00;
+static TaskHandle_t TaskHdlPri01;
+static TaskHandle_t xSetupHardwareTask;
+static void TaskPri00( void *pvParameters ) {
+	while(1) {
+		//xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
+		//vTaskDelay(pdMS_TO_TICKS(1000));
+
+		//vTaskResume(TaskHdlPri01);
+
+	}
+}
+static void TaskPri01( void *pvParameters ) {
+	xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
+
+#if 0
+	/*
+	 * Run the GPIO interrupt example, specify the parameters that
+	 * are generated in xparameters.h.
+	 */
+	int Status = GpioIntrExample(&Intc, &Gpio, GPIO_DEVICE_ID, GPIO_INTERRUPT_ID);
+	if (Status != XST_SUCCESS) {
+		xil_printf("GPIO Interrupt Example Test Failed\r\n");
+		return XST_FAILURE;
+	}
+#endif
+
+
+	start = pmon_start_cycle_counter();
+	int_start = 0;
+	int_end = 0;
+	while(1) {
+		xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
+		//vTaskDelay(pdMS_TO_TICKS(1000)); // Ç±ÇÍÇì¸ÇÍÇÈÇ∆TaskÇ™ãNÇ´ÇƒÇ±Ç»Ç¢ÅBäÑÇËçûÇ›ÇÕì¸ÇÈÅB
+
+		//vTaskSuspend(NULL);
+		task_steady = pmon_read_cycle_counter();
+		//end = pmon_read_cycle_counter();
+		//xil_printf("time = %ld\r\n", end - start);
+		//if (int_start != 0 && int_end != 0) {
+		if(button_push) {
+			xil_printf("%ld %ld\r\n", int_start - task_steady, int_end - int_start);
+			int_start = 0;
+			int_end = 0;
+		}
+	}
+}
+
+static void prvSetupHardwareTask( void *pvParameters ) {
+	xil_printf("%s\r\n", GetTaskName(xTaskGetCurrentTaskHandle()));
+	/*
+	 * Run the GPIO interrupt example, specify the parameters that
+	 * are generated in xparameters.h.
+	 */
+	int Status = GpioIntrExample(&Intc, &Gpio, GPIO_DEVICE_ID, GPIO_INTERRUPT_ID);
+	if (Status != XST_SUCCESS) {
+		xil_printf("GPIO Interrupt Example Test Failed\r\n");
+		return XST_FAILURE;
+	}
+	vTaskDelete( xSetupHardwareTask );
+}
+
+
 int main( void )
 {
 	xil_printf("main\r\n");
@@ -184,26 +216,16 @@ int main( void )
 #if 1
 	//xTaskCreate(TaskPri00,"TaskPri00", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY, &TaskHdlPri00 );
 	xTaskCreate(TaskPri01,"TaskPri01", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY+1, &TaskHdlPri01 );
+    xTaskCreate(prvSetupHardwareTask, ( const char * ) "Setup", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY + 3, &xSetupHardwareTask );
 
 
 
-	/*
-	 * Run the GPIO interrupt example, specify the parameters that
-	 * are generated in xparameters.h.
-	 */
-	int Status = GpioIntrExample(&Intc, &Gpio, GPIO_DEVICE_ID,
-				 GPIO_INTERRUPT_ID);
-
-	if (Status != XST_SUCCESS) {
-		xil_printf("GPIO Interrupt Example Test Failed\r\n");
-		return XST_FAILURE;
-	}
 
 
 
 	xil_printf( "Hello from Freertos example main\r\n" );
 
-
+    //while(1){};
 
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
@@ -418,7 +440,7 @@ int GpioIntrExample(XScuGic *Intc, XGpioPs *Gpio, u16 DeviceId, u16 GpioIntrId)
 	 * Loop forever while the button changes are handled by the interrupt
 	 * level processing.
 	 */
-	while(AllButtonsPressed == FALSE);
+	//while(AllButtonsPressed == FALSE);
 
 	return XST_SUCCESS;
 }
