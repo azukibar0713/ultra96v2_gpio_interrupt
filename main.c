@@ -222,7 +222,7 @@ static void IntrHandler(void *CallBackRef, u32 Bank, u32 Status)
 	BaseType_t xYieldRequired;
 
 	// Resume the suspended task.
-	xYieldRequired = xTaskResumeFromISR(TaskHdlPri01);
+	//xYieldRequired = xTaskResumeFromISR(TaskHdlPri01);
 
 	if (xYieldRequired == pdTRUE) {
 		// We should switch context so the ISR returns to a different task.
@@ -230,6 +230,7 @@ static void IntrHandler(void *CallBackRef, u32 Bank, u32 Status)
 		// the documentation and examples for your port.
 		//portYIELD_FROM_ISR();
 	}
+	XGpioPs_IntrClearPin(&Gpio, 23);
 }
 
 int GpioSet(XScuGic *Intc, XGpioPs *Gpio, u16 DeviceId, u16 GpioIntrId);
@@ -475,7 +476,7 @@ int GpioSet(XScuGic *Intc, XGpioPs *Gpio, u16 DeviceId, u16 GpioIntrId)
 	XGpioPs_SetIntrType(Gpio, GPIO_BANK, 0xFFFFFFFF, 0, 0x00);  // bitごとのマスクだった。これで押したときだけ割り込みはい９った！.
 
 	/* Set the handler for gpio interrupts. */
-	XGpioPs_SetCallbackHandler(Gpio, (void *)Gpio, IntrHandler);
+	//XGpioPs_SetCallbackHandler(Gpio, (void *)Gpio, IntrHandler);
 
 
 	/* Enable the GPIO interrupts of Bank 0. */
